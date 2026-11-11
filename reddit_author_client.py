@@ -36,9 +36,17 @@ def _load(p, default=None):
 
 def _save(p, d):
     os.makedirs(CFG, mode=0o700, exist_ok=True)
-    with open(p, "w") as f:
+    os.chmod(CFG, 0o700)
+    tmp = p + ".tmp"
+    fd = os.open(tmp, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)   # created 0600 from the start
+    with os.fdopen(fd, "w") as f:
         json.dump(d, f)
-    os.chmod(p, 0o600)
+    os.replace(tmp, p)
+
+
+def _clean(s):
+    """Strip terminal control characters from text that came from Reddit before printing it."""
+    return "".join(ch for ch in str(s) if ch.isprintable() or ch in "\n\t")
 
 
 def _basic(app):
@@ -108,7 +116,7 @@ def _confirm(what):
 
 def rules(sub):
     for r in api("GET", f"/r/{sub}/about/rules").get("rules", []):
-        print(f"- {r['short_name']}: {r.get('description', '')[:300]}")
+        print(f"- {_clean(r['short_name'])}: {_clean(r.get('description', '')[:300])}")
 
 
 def post(sub, title, path):
@@ -123,10 +131,10 @@ def post(sub, title, path):
     r = api("POST", "/api/submit", {"sr": sub, "kind": "self", "title": title, "text": body, "api_type": "json"})
     errs = r.get("json", {}).get("errors")
     if errs:
-        sys.exit(f"Reddit refused: {errs}")
+        sys.exit(f"Reddit refused: {_clean(errs)}")
     log.append({"at": time.time(), "sub": sub, "digest": digest, "url": r["json"]["data"].get("url")})
     _save(LOG, log)
-    print("Posted:", r["json"]["data"].get("url"))
+    print("Posted:", _clean(r["json"]["data"].get("url")))
 
 
 def comments(post_id):
@@ -136,7 +144,7 @@ def comments(post_id):
             if c.get("kind") != "t1":
                 continue
             x = c["data"]
-            print("  " * d + f"[{x['name']}] {x['body'][:400]}")
+            print("  " * d + f"[{_clean(x['name'])}] {_clean(x['body'][:400])}")
             if x.get("replies"):
                 walk(x["replies"]["data"]["children"], d + 1)
     walk(data[1]["data"]["children"])
@@ -146,7 +154,7 @@ def reply(thing_id, path):
     body = open(path, encoding="utf-8").read().strip()
     _confirm(f"Reply to {thing_id}:\n\n{body}\n")
     r = api("POST", "/api/comment", {"thing_id": thing_id, "text": body, "api_type": "json"})
-    print("Replied." if not r.get("json", {}).get("errors") else f"Reddit refused: {r['json']['errors']}")
+    print("Replied." if not r.get("json", {}).get("errors") else f"Reddit refused: {_clean(r['json']['errors'])}")
 
 
 if __name__ == "__main__":
